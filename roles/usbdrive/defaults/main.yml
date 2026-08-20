@@ -1,0 +1,19 @@
+---
+
+#========================================
+# USB Drive Mount Flags
+#
+
+# Drives will be automounted by label under here
+usbdrive_mountdir: /media
+
+# async is the faster default, but should umount before removing.
+# sync is way slower, but more tolerant of removal.
+usbdrive_sync: async
+#usbdrive_sync: sync
+
+# Mount vfat/ntfs as the following if desired
+usbdrive_user:
+usbdrive_group: 
+usbdrive_umask: '002'
+

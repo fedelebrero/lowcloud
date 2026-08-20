@@ -17,3 +17,12 @@
 
 - name: restart unattended-upgrades
   service: name=unattended-upgrades state=restarted
+
+- name: restart smartd
+  service: name=smartd state=restarted
+
+- name: reload hdparm
+  command: /usr/lib/udev/hdparm
+  environment:
+      DEVNAME: "{{ item }}"
+  with_items: "{{ hdparm_drives.keys() }}"

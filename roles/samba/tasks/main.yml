@@ -1,0 +1,40 @@
+---
+# Debian 13 version
+# samba      2:4.22.6
+
+# Samba needs firewall ports 137, 138, 139, 445
+# add 'samba' to firewall_services
+
+- name: samba packages are installed
+  package:
+    state: present
+    name:
+      - samba
+
+- name: configure for NAS data
+  include_tasks: nas-data.yml
+  when: nas_data_shares | default([])
+
+- name: samba configuration present
+  template: src=smb.conf.j2
+    dest=/etc/samba/smb.conf
+    owner=root group=root mode='0644'
+    validate='testparm -s %s'
+  notify:
+    - restart samba
+
+- name: samba start on boot
+  service:
+    name: "{{ samba_daemon }}"
+    state: started
+    enabled: true
+
+- name: configure for nas users
+  include_tasks: nas-user.yml
+  with_items: "{{ nas_users }}"
+  loop_control:
+    loop_var: nasuser
+  when: nas_users | default([])
+
+# Only install if we specifically request wsdd
+- { include_tasks: wsdd.yml,        when: use_wsdd }

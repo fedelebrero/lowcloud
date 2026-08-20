@@ -26,7 +26,7 @@ hostname_ipv6:  "{{ ansible_default_ipv6.address | default('') }}"
 # something finer grained.
 host_locale:    en_US.UTF-8
 host_language:  "{{ host_locale }}"
-  
+
 #========================================
 # NTP - use nearby ntp servers by default
 #
@@ -42,6 +42,13 @@ ntp_servers:
   - 2.pool.ntp.org
   - 3.pool.ntp.org
   
+# Debian 13 retired ntp, replaced with ntpsec.  Available on older
+# Debian 12 and 11 too.
+
+# ntp_package: ntp
+ntp_package:    ntpsec
+
+
 
 #========================================
 # For quick reimaging, the 'snapshot' tag will copy locally unique
@@ -52,6 +59,54 @@ ntp_servers:
 snapshot_dir: "{{playbook_dir}}/snapshot/{{inventory_hostname}}"
 
 
+#========================================
+# SMART disk monitoring - List the devices in smartd_drives and they
+# will all be added with the scan_opts arguments.  The extra_scanlines
+# are added verbatim to the config.
+
+use_smartctl:
+  "{{ (smartd_drives|length + smartd_extra_scanlines|length) > 0 }}"
+
+smartd_drives: []
+smartd_extra_scanlines: []
+
+# The default settings monitor all attributes, do automatic data
+# collection, automatic attribute autosave, short self-test daily
+# between 2-3am, and long self-test Saturdays between 3-4am.  For big
+# disks, consider changing long to monthly like "L/../05/./03", which
+# runs on the fifth day of every month at 3am.
+smartd_scan_opts: 
+  "-a -o on -S on -s (S/../.././02|L/../../6/03) -m {{ admin_email }} -M test"
+
+# -H display the health status as reported by the device
+# -l error show the increase in the number of SMART errors since last check
+# -l selftest show the increase in the number of failed tests in the SMART Self-Test Log
+# -M test send a test email on startup
+
+
+
+
+
+#========================================
+
+# HDPARM drive parameters - If any devices are listed in
+# hdparm_drives, hdparm will be installed and a hdparm.conf will be
+# created with the hash of parameters associated with each drive.
+
+use_hdparm:
+  "{{ (hdparm_drives|length) > 0 }}"
+
+
+# Settings for a drive using its persistent UUID (recommended)
+# hdparm_drives:
+#   /dev/disk/by-uuid/your-drive-uuid:
+#       apm: 127
+#       spindown_time: 240
+
+
+hdparm_drives: {}
+
+  
 #========================================
 # Network and Firewall settings
 #
@@ -120,6 +175,21 @@ firewall_openudp_dns: [53]
 # Bacula Ports - Director (9101), File (9102), Storage (9103)
 firewall_opentcp_bacula: [9101, 9102, 9103]
 
+# Samba Ports - mix of UDP and TCP.   
+firewall_openudp_samba: [137, 138]
+firewall_opentcp_samba: [139, 445]
+
+firewall_openudp_smb: '{{ firewall_openudp_samba }}'
+firewall_opentcp_smb: '{{ firewall_opentcp_samba }}'
+
+firewall_openudp_wsdd: [3702, 5355]
+firewall_opentcp_wsdd: [3702, 5355]
+
+firewall_openudp_plex: [1900, 32410, 32412, 32413, 32414]
+firewall_opentcp_plex: [32400, 8324, 32469]
+
+firewall_openudp_jellyfin: [7359]
+firewall_opentcp_jellyfin: [8096, 8920]
 
 # Construct the list of open TCP and UDP ports from the known services
 # and any extra ports.  A group or host var could override this, but
@@ -140,7 +210,16 @@ firewall_ports_udp: >-
   {{- ns.ports.extend( lookup('vars', 'firewall_openudp_'+i, default=[]) ) -}}
   {%- endfor -%}
   {{- ns.ports | sort | unique -}}
-  
+
+
+# Want to also support opening ports to connections from a specific
+# subnet like 192.168.1.0/24.   Build into prerouting chain like the
+# global connections but add a -s source
+# subnet_services:
+#   - source: 192.168.1.0/24
+#     source_v6: fe80::/10
+#     tcp: samba
+#     udp: samba
 
 # ========================================  
 # fail2ban
@@ -164,7 +243,7 @@ fail2ban_jails_expanded: >-
   {%- set ns = namespace(lst=(fail2ban_jail_ssh)) -%}
   {%- for i in fail2ban_jails -%} 
   {%- if i is string -%}
-  {{- ns.lst.extend( lookup('vars', 'fail2ban_jail_' + i, default=[{'name': i}]) ) -}}
+  {{- ns.lst.extend( lookup('vars', 'fail2ban_jail_' + i, default=[]) ) -}}
   {%- elif i is mapping -%}
   {{- ns.lst.append( i ) -}}
   {%- endif -%}

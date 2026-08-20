@@ -25,9 +25,10 @@
 <H1>LowCloud Mail, Web, and Backup</H1>
 
 <p>These Ansible roles set up mail and web service in the cloud, with
-backups from a separate machine.  Requirements are low, with few extra
-frills, and should appeal to anyone comfortable with stone knives and
-bearskins.  My three goals for this exercise were:</p>
+backups from a separate machine or a ZFS-based NAS.  Requirements are
+low, with few extra frills, and should appeal to anyone comfortable
+with stone knives and bearskins.  My three goals for this exercise
+were:</p>
 
 <ol>
 <li>Basic mail and web for one or more domains, 
@@ -54,6 +55,8 @@ some fun pictures of my old hardware at the bottom of each page.</p>
 <li><a href="encrypt.html">Encryption</a>
 <li><a href="dns.html">DNS</a>
 <li><a href="webmail.html">Webmail</a>
+<li><a href="nas.html">NAS</a>
+<li><a href="media.html">Media Server</a>
 <li><a href="updates.html">Updates</a>
 </ul>
 
@@ -100,9 +103,12 @@ have an sense of how many people find it useful.
 
 <p>The <code>myhosts/hosts</code> file
 identifies <a href="machines.html">your machines</a>, and organizes
-them into groups.  We use two groups: <code>cloud</code>
-and <code>backup_server</code>.  The playbooks apply tasks to the
-machines in each group.  </p>
+them into groups.  We use two groups: <code>cloud</code> and
+either <code>backup_server</code> or <code>nas</code>.
+The <code>nas</code> group does backups, but also sets up
+a <a href="nas.html">ZFS-based file server</a>, possibly with a media
+server like jellyfin or plex.  The playbooks apply tasks to the
+machines in each group.</p>
 
 <p>Machines are listed by fully qualified domain name (FQDN) and IP
 address.  Ansible uses the <code>ansible_host</code> to connect, and
@@ -120,12 +126,20 @@ example.com		ansible_host=1.2.3.4
 # have physical control of the machine.  It does not need a public IP
 # and can be behind a residential ISP connection.
 guardian.example.com	ansible_host=5.6.7.8
+
+[nas]
+# ZFS-based file server, also running as a backup server, possibly
+# with a media server like jellyfin or plex,
+nas.example.com	     	ansible_host=13.14.15.16
 </PRE>
 
 <p>Once you have machines, <a href="dns.html">create DNS entries for
 them</a> using your registrar or other service.  We may eventually run
 Bind on the cloud machine, but still getting that sorted out.</p>
 
+<p>A <code>webmail</code> group is for a separate VPS machine with a
+<a href="webmail.html">Roundcube instance</a> that uses your mail
+server.  </p>
 
 <!-- ============================== -->
 <H2 class=rule>
@@ -139,8 +153,9 @@ Every machine belongs to the special <code>all</code> group.</p>
 
 <p>Most settings are in <code>all/all.yml</code>.  Look through this
 file and customize the values as appropriate.  A few things unique to
-each machine are kept in <code>cloud.yml</code>
-and <code>backup_server.yml</code>.
+each machine are kept
+in <code>cloud.yml</code>, <code>backup_server.yml</code>,
+and <code>nas.yml</code>.
 
 <p>Sensitive values like passwords are in
 <code>all/vault.yml</code>, which will be an encrypted
@@ -203,6 +218,11 @@ login ever happens.  Ansible needs the <code>sshpass</code> package on
 your local machine to do password-based login to a remote machine.  If
 you can pre-install an ssh key for root, you could use
 the <code>--private-key</code> flag instead.</p>
+
+<p>If sudo is not installed, like with a some stock installs, you can
+call the playbook with <code>--become-method=su</code>.  If the deploy
+account is already present, you can specify it on the command line
+with <code>--extra-vars "first_acct=deploy"</code>.
 
 <PRE class=code>
 $ ansible-playbook -k --ask-vault-pass -i ../myhosts first.yml --limit cloud
@@ -295,7 +315,7 @@ though, as that is a little old.
 </figure>
 
 <div class=copyright>
-<p>Copyright &copy; 2020-2025 David Loffredo, licensed under
+<p>Copyright &copy; 2020-2026 David Loffredo, licensed under
 <a rel="license" href="https://creativecommons.org/licenses/by-sa/4.0/">
 CC BY-SA 4.0</a>.
 </p>

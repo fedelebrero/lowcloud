@@ -1,0 +1,30 @@
+---
+# Create user account and group to own all common files on the NAS.
+- name: "{{ nas_data_group }} group present"
+  group:
+    name: "{{ nas_data_group }}"
+    state: present
+
+- name: "{{ nas_data_user }} account present"
+  user:
+    name: "{{ nas_data_user }}"
+    group: "{{ nas_data_group }}"
+    shell: /sbin/nologin
+    password: '*'
+    state: present
+
+# create_home: false
+
+# - name: smb account has authorized keys
+#   authorized_key:
+#     user: "{{ nas_data_user }}"
+#     key:  "{{ lookup('file', nas_acct_sshpub) }}"
+
+- name: NAS data shares have proper ownership
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nas_data_user }}"
+    group: "{{ nas_data_group }}"
+    mode: '02775'
+  with_items: "{{ nas_data_shares }}"

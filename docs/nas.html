@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>NAS Service</title>
+<link rel="stylesheet" type="text/css" href="style.css">
+</head>
+<body>
+<div class=toc>
+<UL>
+<LI><A href=index.html>[home]</A>
+<p>
+<li><a href="#vars">Variables</a>
+<li><a href="#manage">Managing The System</a>
+<li><a href="#why">Why These Packages?</a>
+</UL>
+</div>
+
+<div class=main>
+<H1>NAS Service</H1>
+ 
+<p><b>ROLES</b> zfs, samba
+
+<p>The NAS group in the <code>site.yml</code> sets up a machine that
+uses the "zfs" role for software raid/mirroring and the "samba" role
+for file sharing to Windows/MacOS clients.  Samba is configured on the
+standard ports.  If you are building a new machine or adding disks, be
+sure to do adequate <a href="burnin.html">burn-in testing</a>.</p>
+
+<p>Everyone's use case is different, but my need is a simple
+fileserver with a shared common area for music and pictures, plus home
+directories for individual user files.</p>
+
+<p>The <code>zfs</code> role creates zpools and filesystems.  We just
+use the default Debian monthly scrub/trim cron job.  I trimmed the zfs
+role to the basics.  Look at
+<a href=https://github.com/aisbergg/ansible-role-zfs.git>this role</a>
+if you want something that does ZVOLs, custom scrubs, zrepl, and other
+things.  We use the following ansible galaxy modules:</p>
+<ul>
+<li>community.general.zfs</li>
+<li>community.general.zfs_facts</li>
+<li>community.general.zpool_facts</li>
+</ul>
+
+<p>If they are not already present, you can install by doing:</p>
+<PRE class=code>
+% ansible-galaxy collection install community.general
+</PRE>
+
+<p>The <code>samba</code> role installs the samba server and creates
+local accounts with samba access.  You can create whatever shares you
+want, but we can call out certain ones to be owned by the 'nas-data'
+user and 'nas-data' group for common areas accessible by all users
+(media files, family pictures, etc.)</p>
+
+<p>The <code>common</code> role sets up SMART disk monitoring if we
+set a list of drives to monitor.</p>
+
+
+<!-- ============================== -->
+<H2 class=rule>
+<A NAME=vars></A>Variables</H2>
+
+<p>The <code>zfs_pools</code> variable is a list of pools, with a
+string describing the vdev, along any other settings.  It looks
+something like this.  
+
+<PRE class=code>
+zfs_pools: 
+  - name: tank
+    vdev: &gt;-
+       mirror 
+       ata-BIGDRIVE1
+       ata-BIGDRIVE2
+       cache
+       nvme-FASTDRIVE
+</PRE>
+
+Specify pool <code>properties:</code> for a specific ashift,
+or <code>filesystem_properties:</code> for things like compression or
+case sensitivity. The role will create the pools if they do not exist,
+or force import them if they are available, even if they were not
+previously exported.</p>
+
+<p>The <code>zfs_filesystems</code> variable lists filesystems, with
+their properties.
+The <code>zfs_filesystems_properties_defaults</code> are applied to
+every filesystem.</p>
+
+<PRE class=code>
+zfs_filesystems:
+  - name: tank/myfs
+    properties:
+       mountpoint: /myfs
+       casesensitivity: mixed
+       quota: 20G
+</PRE>
+
+<p>Some settings (casesensitivity, encryption, keyformat, pbkdf2iters,
+utf8only, and normalization) can only be set at creation time.  Use
+the quota keyword to limit filesystem sizes.  The value can use M/G/T
+units, but when doing so, Ansible will always show the value as
+changed because zfs reports current the quota in bytes.</p>
+
+<p>For automatic snapshots, configure filesystems in
+the <code>zfs_snapshot_policy</code> dictionary with templates defined
+by the <b>zfs_snapshot_templates</b> dictionary.  The daily, monthly,
+weekly, hourly, or frequently (~15min) properties list the number of
+copies to maintain.  Zero indicates no snapshot.</p>
+
+<PRE class=code>
+zfs_snapshot_policy:
+    tank/myfs: { use_template: base }
+
+zfs_snapshot_templates:
+  base:
+    frequently: 0
+    hourly: 24
+    daily: 7
+    weekly: 4
+    monthly: 6
+    yearly: 0
+    autosnap: yes
+    autoprune: yes
+</PRE>
+
+<p>Sanoid runs every 15min from a systemd timer.  If this is more
+frequent than you need, perhaps preventing disks from standby, you can
+modify it with the <code>zfs_snapshot_timer</code> variable.</p>
+
+<p>Enable SMART monitoring on disks by listing them in the
+<code>smartd_drives</code> variable.  If set, smartmontools is
+installed and smard.conf is created with periodic short and long
+testing for each drive with email to the admin address.  It does the
+short test nightly and long test once per week.  A long test can take
+two days on a 20+T drive, so you may want to customize the checks by
+setting <code>smartd_scan_opts</code>, or put your own freeform lines
+into the config file by setting <code>smartd_extra_scanlines</code>.
+
+<PRE class=code>
+smartd_drives: 
+  - /dev/disk/by-id/ata-BIGDRIVE1
+  - /dev/disk/by-id/ata-BIGDRIVE2
+
+<i># The default settings monitor all attributes, do automatic data
+# collection, automatic attribute autosave, short self-test daily
+# between 2-3am, and long self-test Saturdays between 3-4am.  For big
+# disks, consider changing long to monthly like "L/../05/./03", which
+# runs on the fifth day of every month at 3am.</i>
+smartd_scan_opts: 
+  "-a -o on -S on -s (S/../.././02|L/../../6/03) -m {{ admin_email }} -M test"
+</PRE>
+
+<p>Set power management and spindown time for your HDDs with
+the <code>hdparm_drives</code> variable.  If set, hdparm is installed
+and hdparm.conf is created.  This variable is a dictionary with the
+UUID device of the HDD and the parameters to set.  Automatic power
+management (APM) values 1-127 permit spin-down, while 128-254 do not
+(See "hdparm -B").  Spin down times 1-240 are multiples of 5sec, while
+241-251 are 1-11*30min (See "hdparm -S").</p>
+
+<PRE class=code>
+hdparm_drives:
+    /dev/disk/by-id/ata-BIGDRIVE1:
+         apm: 127
+         spindown_time: 240
+    /dev/disk/by-id/ata-BIGDRIVE2:
+         apm: 127
+         spindown_time: 240
+</PRE>
+
+<p>NAS Samba users are created through the <code>nas_users</code>
+variable, which takes a list of name, password, and other values.
+They will have unix accounts with SMB passwords.  They will be able to
+SMB mount shared disks, but unless you add an SSH authorized key, they
+can only log in on the console.</p>
+
+<p>You can set <code>smbonly</code> if the unix account exists already
+from some other action and you just want to set the SMB password.  The
+account must already exist at this point if you set to true.</p>
+
+<PRE class=code>
+nas_users:
+  - name: someuser
+    pw: "{{ vault_nas_someuser_pw }}"
+    # home: /homenas/someuser   if want homedir elsewhere
+    # smbonly: true             skip create unix acct
+</PRE>
+
+<p>To change passwords after account creation, log as the user and
+run <code>smbpasswd</code>.  This will change SMB and unix passwords
+together.</p>
+
+<PRE class=code>
+% smbpasswd
+Old SMB password: *****
+New SMB password: ******** 
+Retype new SMB password: ******** 
+Password changed for user someuser
+</PRE>
+
+
+<!-- ============================== -->
+<H2 class=rule>
+<A NAME=manage></A>Managing the System</H2>
+
+
+<p>Use <code>arcstat</code> to get basic status on the memory cache or
+use the <code>arc_summary</code> command for a more detailed report on
+the ZFS subsystem.</p>
+
+<PRE class=code>
+% arcstat
+
+% arc_summary | more
+% arc_summary -d | more
+</PRE>
+
+
+
+
+<!-- ============================== -->
+<H2 class=rule>
+<A NAME=why></A>Why These Packages?</H2>
+
+<p>The easy path is to buy a commercial NAS and just configure with
+their web interface.  I prefer to assemble my own hardware, but did
+try TrueNAS.  It was very smooth, but assumed total control of the
+machine. I want a machine that serves files, but can easily be used
+for general purpose things as well.</p>
+
+<p>Disk sizes have gotten so stupendously huge that I didn't feel
+comfortable running a straight ext4 filesystem.  I've rarely had disk
+problems, but resilvering a replacement disk on a ZFS mirrored setup
+is a lot simpler than finding and restoring double digit terabytes
+from backups.</p>
+
+<p>I chose sanoid over zfs-auto-snapshot because sanoid has a simple
+configuration file and actually obeys it.  I did not want frequent and
+hourly snapshots but zfs-auto-snapshot seemed to ignore the
+com.sun:auto-snapshot:frequently and hourly properties, contrary to
+the documentation.</p>
+
+<p>Samba is an obvious choice if you are going to support Windows
+clients.  NFS is also an obvious choice if any UNIX machines are in
+the mix.  I originally built this for home use, which is mostly
+Windows with the occasional Linux box, so we'll see if that is
+sufficient.</p>
+
+<figure>
+<img src="images/bigiron.jpg" alt="Big Iron Fileserver">
+<figcaption>Your NAS box should be big iron, like a Pentium 4 box
+serving 120G of pure disk goodness.
+</figcaption>
+</figure>
+
+<div class=copyright>
+<p>Copyright &copy; 2020-2026 David Loffredo, licensed under
+<a rel="license" href="https://creativecommons.org/licenses/by-sa/4.0/">
+CC BY-SA 4.0</a>.
+</p>
+</div>
+</div>
+</body>
+</html>
